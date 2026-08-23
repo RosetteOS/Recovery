@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Add Slot 2/B payloads to an Ingenic ZIP package."""
+"""Replace Ingenic payloads or add NebulaOS Slot 2/B payloads."""
 
 from __future__ import annotations
 
@@ -27,14 +27,26 @@ SLOT2_OTA_MARKER = b"ota:kernel2\n\n"
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
-            "Rebuild an .ingenic package with stock Slot 1/A payloads and "
-            "new Slot 2/B payloads."
+            "Rebuild an .ingenic package by replacing Slot 1/A payloads or "
+            "adding Slot 2/B payloads."
         )
     )
     parser.add_argument("input", type=Path, help="Source .ingenic package")
     parser.add_argument("output", type=Path, help="Rebuilt .ingenic package")
-    parser.add_argument("--root2", required=True, type=Path, help="root2 image")
-    parser.add_argument("--kernel2", required=True, type=Path, help="kernel2 image")
+    root_group = parser.add_mutually_exclusive_group()
+    root_group.add_argument(
+        "--root1", type=Path, help="Replace the Slot 1/A rootfs image only"
+    )
+    root_group.add_argument(
+        "--root2", type=Path, help="Add or replace the Slot 2/B rootfs image"
+    )
+    kernel_group = parser.add_mutually_exclusive_group()
+    kernel_group.add_argument(
+        "--kernel1", type=Path, help="Replace the Slot 1/A kernel image only"
+    )
+    kernel_group.add_argument(
+        "--kernel2", type=Path, help="Add or replace the Slot 2/B kernel image"
+    )
     parser.add_argument(
         "--ota-entry",
         default=DEFAULT_OTA_ENTRY,
@@ -55,7 +67,19 @@ def parse_args() -> argparse.Namespace:
         default=DEFAULT_RTOS2_ENTRY,
         help=f"Slot 2/B RTOS archive entry (default: {DEFAULT_RTOS2_ENTRY})",
     )
-    return parser.parse_args()
+    args = parser.parse_args()
+    slot1_mode = args.root1 is not None or args.kernel1 is not None
+    slot2_mode = args.root2 is not None or args.kernel2 is not None
+    if slot1_mode == slot2_mode:
+        parser.error(
+            "specify exactly one complete pair: --root1 with --kernel1, "
+            "or --root2 with --kernel2"
+        )
+    if (args.root1 is None) != (args.kernel1 is None):
+        parser.error("--root1 and --kernel1 must be supplied together")
+    if (args.root2 is None) != (args.kernel2 is None):
+        parser.error("--root2 and --kernel2 must be supplied together")
+    return args
 
 
 def require_file(path: Path, description: str) -> None:
@@ -148,40 +172,54 @@ def renamed_info(template: zipfile.ZipInfo, filename: str) -> zipfile.ZipInfo:
 
 def rebuild(args: argparse.Namespace) -> None:
     require_file(args.input, "Input package")
-    require_file(args.root2, "root2 image")
-    require_file(args.kernel2, "kernel2 image")
+
+    slot1_mode = args.root1 is not None
+    if slot1_mode:
+        require_file(args.root1, "root1 image")
+        require_file(args.kernel1, "kernel1 image")
+        replacements = {
+            STOCK_ROOTFS_ENTRY: args.root1.resolve(),
+            STOCK_KERNEL_ENTRY: args.kernel1.resolve(),
+        }
+    else:
+        require_file(args.root2, "root2 image")
+        require_file(args.kernel2, "kernel2 image")
+        replacements = {
+            args.root2_entry: args.root2.resolve(),
+            args.kernel2_entry: args.kernel2.resolve(),
+        }
 
     output = args.output.resolve()
     output.parent.mkdir(parents=True, exist_ok=True)
-
-    replacements = {
-        args.root2_entry: args.root2.resolve(),
-        args.kernel2_entry: args.kernel2.resolve(),
-    }
 
     temporary_name: str | None = None
     try:
         with zipfile.ZipFile(args.input, "r") as source:
             infos = {info.filename: info for info in source.infolist()}
-            required_stock_entries = {
-                STOCK_ROOTFS_ENTRY,
-                STOCK_KERNEL_ENTRY,
-                STOCK_RTOS_ENTRY,
-                DUAL_SLOT_CONFIG_ENTRY,
-            }
+            required_stock_entries = {STOCK_ROOTFS_ENTRY, STOCK_KERNEL_ENTRY}
+            if not slot1_mode:
+                required_stock_entries.update(
+                    {STOCK_RTOS_ENTRY, DUAL_SLOT_CONFIG_ENTRY}
+                )
             missing = [entry for entry in required_stock_entries if entry not in infos]
             if missing:
                 raise ValueError(
                     "Input package is missing required Slot 1/A entries: "
                     + ", ".join(missing)
                 )
-            configured_profile = configure_dual_slot_profile(
-                source.read(DUAL_SLOT_CONFIG_ENTRY)
-            )
+            configured_profile = None
+            if not slot1_mode:
+                configured_profile = configure_dual_slot_profile(
+                    source.read(DUAL_SLOT_CONFIG_ENTRY)
+                )
 
-            target_entries = set(replacements) | {args.rtos2_entry, args.ota_entry}
-            if target_entries & required_stock_entries:
-                raise ValueError("Slot 2/B entry names must differ from Slot 1/A entry names")
+            target_entries = set(replacements)
+            if not slot1_mode:
+                target_entries.update({args.rtos2_entry, args.ota_entry})
+                if target_entries & required_stock_entries:
+                    raise ValueError(
+                        "Slot 2/B entry names must differ from Slot 1/A entry names"
+                    )
 
             with tempfile.NamedTemporaryFile(
                 dir=output.parent,
@@ -193,7 +231,9 @@ def rebuild(args: argparse.Namespace) -> None:
 
             with zipfile.ZipFile(temporary_name, "w", allowZip64=True) as destination:
                 for info in source.infolist():
-                    if info.filename == DUAL_SLOT_CONFIG_ENTRY:
+                    if info.filename in replacements:
+                        copy_file(destination, replacements[info.filename], copy.copy(info))
+                    elif not slot1_mode and info.filename == DUAL_SLOT_CONFIG_ENTRY:
                         write_bytes(
                             destination,
                             configured_profile,
@@ -202,29 +242,30 @@ def rebuild(args: argparse.Namespace) -> None:
                     elif info.filename not in target_entries:
                         copy_entry(source, destination, info)
 
-                # Keep the appended Slot 2/B entry order used by the
-                # reference package: ota, RTOS, kernel, rootfs.
-                write_bytes(
-                    destination,
-                    SLOT2_OTA_MARKER,
-                    renamed_info(infos[STOCK_KERNEL_ENTRY], args.ota_entry),
-                )
-                copy_entry(
-                    source,
-                    destination,
-                    infos[STOCK_RTOS_ENTRY],
-                    renamed_info(infos[STOCK_RTOS_ENTRY], args.rtos2_entry),
-                )
-                copy_file(
-                    destination,
-                    replacements[args.kernel2_entry],
-                    renamed_info(infos[STOCK_KERNEL_ENTRY], args.kernel2_entry),
-                )
-                copy_file(
-                    destination,
-                    replacements[args.root2_entry],
-                    renamed_info(infos[STOCK_ROOTFS_ENTRY], args.root2_entry),
-                )
+                if not slot1_mode:
+                    # Keep the appended Slot 2/B entry order used by the
+                    # reference package: ota, RTOS, kernel, rootfs.
+                    write_bytes(
+                        destination,
+                        SLOT2_OTA_MARKER,
+                        renamed_info(infos[STOCK_KERNEL_ENTRY], args.ota_entry),
+                    )
+                    copy_entry(
+                        source,
+                        destination,
+                        infos[STOCK_RTOS_ENTRY],
+                        renamed_info(infos[STOCK_RTOS_ENTRY], args.rtos2_entry),
+                    )
+                    copy_file(
+                        destination,
+                        replacements[args.kernel2_entry],
+                        renamed_info(infos[STOCK_KERNEL_ENTRY], args.kernel2_entry),
+                    )
+                    copy_file(
+                        destination,
+                        replacements[args.root2_entry],
+                        renamed_info(infos[STOCK_ROOTFS_ENTRY], args.root2_entry),
+                    )
 
         os.replace(temporary_name, output)
         temporary_name = None
@@ -237,12 +278,18 @@ def rebuild(args: argparse.Namespace) -> None:
                 pass
 
     with zipfile.ZipFile(output, "r") as rebuilt:
-        expected_sizes = {
-            args.root2_entry: args.root2.stat().st_size,
-            args.kernel2_entry: args.kernel2.stat().st_size,
-            args.rtos2_entry: infos[STOCK_RTOS_ENTRY].file_size,
-            args.ota_entry: len(SLOT2_OTA_MARKER),
-        }
+        if slot1_mode:
+            expected_sizes = {
+                STOCK_ROOTFS_ENTRY: args.root1.stat().st_size,
+                STOCK_KERNEL_ENTRY: args.kernel1.stat().st_size,
+            }
+        else:
+            expected_sizes = {
+                args.root2_entry: args.root2.stat().st_size,
+                args.kernel2_entry: args.kernel2.stat().st_size,
+                args.rtos2_entry: infos[STOCK_RTOS_ENTRY].file_size,
+                args.ota_entry: len(SLOT2_OTA_MARKER),
+            }
         for entry, expected_size in expected_sizes.items():
             actual_size = rebuilt.getinfo(entry).file_size
             if actual_size != expected_size:
@@ -250,20 +297,27 @@ def rebuild(args: argparse.Namespace) -> None:
                     f"Replacement failed for {entry}: "
                     f"expected {expected_size} bytes, found {actual_size}"
                 )
-        if rebuilt.read(args.ota_entry) != SLOT2_OTA_MARKER:
-            raise ValueError(f"OTA marker is not set to Slot 2/B in {args.ota_entry}")
-        if rebuilt.read(DUAL_SLOT_CONFIG_ENTRY) != configured_profile:
-            raise ValueError(f"Dual-slot profile was not updated in {DUAL_SLOT_CONFIG_ENTRY}")
+        if not slot1_mode:
+            if rebuilt.read(args.ota_entry) != SLOT2_OTA_MARKER:
+                raise ValueError(f"OTA marker is not set to Slot 2/B in {args.ota_entry}")
+            if rebuilt.read(DUAL_SLOT_CONFIG_ENTRY) != configured_profile:
+                raise ValueError(
+                    f"Dual-slot profile was not updated in {DUAL_SLOT_CONFIG_ENTRY}"
+                )
 
     print(f"Wrote {output} ({output.stat().st_size} bytes)")
-    print(f"  {STOCK_ROOTFS_ENTRY} kept as Slot 1/A")
-    print(f"  {STOCK_KERNEL_ENTRY} kept as Slot 1/A")
-    print(f"  {STOCK_RTOS_ENTRY} kept as Slot 1/A")
-    print(f"  {args.root2_entry} <- {args.root2} ({args.root2.stat().st_size} bytes)")
-    print(f"  {args.kernel2_entry} <- {args.kernel2} ({args.kernel2.stat().st_size} bytes)")
-    print(f"  {args.rtos2_entry} <- {STOCK_RTOS_ENTRY} (stock copy)")
-    print(f"  {args.ota_entry} <- ota:kernel2 (Slot 2/B)")
-    print(f"  {DUAL_SLOT_CONFIG_ENTRY} <- dual-slot Cloner policy")
+    if slot1_mode:
+        print(f"  {STOCK_ROOTFS_ENTRY} <- {args.root1} (Slot 1/A replacement)")
+        print(f"  {STOCK_KERNEL_ENTRY} <- {args.kernel1} (Slot 1/A replacement)")
+    else:
+        print(f"  {STOCK_ROOTFS_ENTRY} kept as Slot 1/A")
+        print(f"  {STOCK_KERNEL_ENTRY} kept as Slot 1/A")
+        print(f"  {STOCK_RTOS_ENTRY} kept as Slot 1/A")
+        print(f"  {args.root2_entry} <- {args.root2} ({args.root2.stat().st_size} bytes)")
+        print(f"  {args.kernel2_entry} <- {args.kernel2} ({args.kernel2.stat().st_size} bytes)")
+        print(f"  {args.rtos2_entry} <- {STOCK_RTOS_ENTRY} (stock copy)")
+        print(f"  {args.ota_entry} <- ota:kernel2 (Slot 2/B)")
+        print(f"  {DUAL_SLOT_CONFIG_ENTRY} <- dual-slot Cloner policy")
 
 
 def main() -> int:

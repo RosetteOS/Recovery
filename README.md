@@ -1,7 +1,7 @@
 # Recovery package rebuild
 
-The `rebuild_ingenic.py` script preserves the stock Slot 1/A payloads and adds
-Slot 2/B entries to the Ingenic package:
+The `rebuild_ingenic.py` script supports two modes. By default, it preserves
+the stock Slot 1/A payloads and adds Slot 2/B entries to the Ingenic package:
 
 - `images/xImage` remains the stock Slot 1/A kernel; `images/xImage2` receives
   the NebulaOS Slot 2/B kernel.
@@ -15,6 +15,18 @@ Slot 2/B entries to the Ingenic package:
   retains the stock full-MMC erase behavior.
 
 The archive is rewritten while preserving all other entries.
+
+To replace only the Slot 1/A kernel and rootfs, provide `--kernel1` and
+`--root1` instead. This mode does not add Slot 2/B entries or modify the
+dual-slot Cloner profile:
+
+```sh
+python3 scripts/rebuild_ingenic.py \
+  Ender-3_V3_KE_1.1.0.12.ingenic \
+  stock-slot1-replaced.ingenic \
+  --root1 rootfs.squashfs \
+  --kernel1 xImage
+```
 
 Example:
 
