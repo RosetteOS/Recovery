@@ -1,13 +1,18 @@
-name: Rebuild Ingenic package
+name: Build RosetteOS Recovery & OTA Packages
 
 on:
   workflow_dispatch:
+    inputs:
+      ota_version:
+        description: 'Creality OTA package version'
+        required: false
+        default: '1.1.0.34'
 
 permissions:
   contents: write
 
 jobs:
-  rebuild:
+  build:
     runs-on: ubuntu-latest
 
     steps:
@@ -42,62 +47,92 @@ jobs:
           root2_url="$(jq -er "${latest_release_filter} | [.assets[] | select(.name == \"rootfs.squashfs\") | .browser_download_url] | select(length == 1) | .[0]" "$release_json")"
           kernel2_url="$(jq -er "${latest_release_filter} | [.assets[] | select(.name == \"xImage\") | .browser_download_url] | select(length == 1) | .[0]" "$release_json")"
           safe_tag="$(printf '%s' "$release_tag" | sed 's/[^A-Za-z0-9._-]/-/g')"
-          package_name="Ender-3_V3_KE_1.1.0.12-${safe_tag}.ingenic"
+          ingenic_package="Ender-3_V3_KE_1.1.0.12-${safe_tag}.ingenic"
 
           {
             echo "release_tag=$release_tag"
             echo "root2_url=$root2_url"
             echo "kernel2_url=$kernel2_url"
-            echo "package_name=$package_name"
+            echo "ingenic_package=$ingenic_package"
           } >> "$GITHUB_OUTPUT"
           echo "Using RosetteOS release: $release_tag"
-          echo "Output package: $package_name"
+          echo "Ingenic package: $ingenic_package"
 
-      - name: Download root2 and kernel2
+      - name: Download RosetteOS kernel and rootfs
         env:
           ROOT2_URL: ${{ steps.resolve_release.outputs.root2_url }}
           KERNEL2_URL: ${{ steps.resolve_release.outputs.kernel2_url }}
         run: |
           set -euo pipefail
-          mkdir -p build
+          mkdir -p build_tmp dist
           curl --fail --location --retry 3 --retry-delay 2 --show-error \
-            "$ROOT2_URL" --output build/root2.squashfs
+            "$ROOT2_URL" --output build_tmp/rootfs.squashfs
           curl --fail --location --retry 3 --retry-delay 2 --show-error \
-            "$KERNEL2_URL" --output build/kernel2
-          test -s build/root2.squashfs
-          test -s build/kernel2
+            "$KERNEL2_URL" --output build_tmp/xImage
+          test -s build_tmp/rootfs.squashfs
+          test -s build_tmp/xImage
 
-      - name: Rebuild .ingenic package
+      - name: Rebuild Ingenic cloner package
         run: |
           set -euo pipefail
-          mkdir -p dist
           python3 scripts/rebuild_ingenic.py \
             Ender-3_V3_KE_1.1.0.12.ingenic \
-            "dist/${{ steps.resolve_release.outputs.package_name }}" \
-            --root2 build/root2.squashfs \
-            --kernel2 build/kernel2
+            "dist/${{ steps.resolve_release.outputs.ingenic_package }}" \
+            --root2 build_tmp/rootfs.squashfs \
+            --kernel2 build_tmp/xImage
 
-      - name: Upload rebuilt package
+      - name: Install OTA packager dependencies
+        run: |
+          set -euo pipefail
+          command -v 7z >/dev/null || (sudo apt-get update -qq && sudo apt-get install -y -qq p7zip-full)
+
+      - name: Build Stock CrealityOS OTA packages (Ender-3 V3 KE & Nebula Pad)
+        env:
+          OTA_VERSION: ${{ github.event.inputs.ota_version || '1.1.0.34' }}
+        run: |
+          set -euo pipefail
+          echo "== Building Ender-3 V3 KE stock OTA package =="
+          python3 tools/pack_rosetteos.py \
+            --target ke \
+            --ximage build_tmp/xImage \
+            --rootfs build_tmp/rootfs.squashfs \
+            --zero-bin assets/zero.bin \
+            --version "$OTA_VERSION" \
+            --output "dist/Ender-3_V3_KE_F005_ota_img_V${OTA_VERSION}.img"
+
+          echo "== Building Creality Nebula Pad stock OTA package =="
+          python3 tools/pack_rosetteos.py \
+            --target nebula \
+            --ximage build_tmp/xImage \
+            --rootfs build_tmp/rootfs.squashfs \
+            --zero-bin assets/zero_nebula.bin \
+            --version "$OTA_VERSION" \
+            --output "dist/NEBULA_ota_img_V${OTA_VERSION}.img"
+
+          echo "== Generated packages in dist/ =="
+          ls -lh dist/
+
+      - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: Ender-3_V3_KE-ingenic
-          path: dist/${{ steps.resolve_release.outputs.package_name }}
+          name: rosetteos-recovery-and-ota-packages
+          path: dist/*
           if-no-files-found: error
 
-      - name: Publish rebuilt package to GitHub Release
+      - name: Publish packages to GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ steps.resolve_release.outputs.release_tag }}
-          PACKAGE_PATH: dist/${{ steps.resolve_release.outputs.package_name }}
         run: |
           set -euo pipefail
-          release_title="RosetteOS dual-slot recovery ${RELEASE_TAG}"
+          release_title="RosetteOS Recovery & OTA Packages ${RELEASE_TAG}"
+          files=(dist/*)
 
           if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
-            gh release upload "$RELEASE_TAG" "$PACKAGE_PATH" --clobber
+            gh release upload "$RELEASE_TAG" "${files[@]}" --clobber
             gh release edit "$RELEASE_TAG" --title "$release_title"
           else
-            gh release create "$RELEASE_TAG" "$PACKAGE_PATH" \
+            gh release create "$RELEASE_TAG" "${files[@]}" \
               --title "$release_title" \
-              --notes "Rebuilt dual-slot Ingenic recovery package."
+              --notes "Dual-slot Ingenic cloner and stock CrealityOS USB OTA packages for RosetteOS ${RELEASE_TAG}."
           fi

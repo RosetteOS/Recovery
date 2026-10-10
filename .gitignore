@@ -1,0 +1,14 @@
+# Build output
+/build/
+
+# Firmware images (allow tracked official stock baselines in assets/)
+*.img
+!assets/Ender-3_V3_KE_F005_ota_img_V1.1.0.17.img
+!assets/NEBULA_ota_img_V1.1.0.30.img
+
+# Python cache & temporary files
+__pycache__/
+*.py[cod]
+*$py.class
+*.tmp
+/dist/
