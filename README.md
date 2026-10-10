@@ -106,7 +106,7 @@ The repository includes [`.github/workflows/rebuild-ingenic.yml`](.github/workfl
 1. Resolves the latest published RosetteOS release from [`RosetteOS/RosetteOS`](https://github.com/RosetteOS/RosetteOS).
 2. Downloads `xImage` and `rootfs.squashfs`.
 3. Rebuilds:
-   - Dual-slot Ingenic Cloner package: `Ender-3_V3_KE_1.1.0.12-<tag>.ingenic`
+   - Ingenic Cloner package (Slot 1 replacement): `Ender-3_V3_KE_1.1.0.12-<tag>.ingenic`
    - Ender-3 V3 KE Stock OTA package: `Ender-3_V3_KE_F005_ota_img_V1.1.0.34.img`
    - Creality Nebula Pad Stock OTA package: `NEBULA_ota_img_V1.1.0.34.img`
 4. Uploads all three artifacts and publishes them to the GitHub release.

@@ -72,14 +72,14 @@ jobs:
           test -s build_tmp/rootfs.squashfs
           test -s build_tmp/xImage
 
-      - name: Rebuild Ingenic cloner package
+      - name: Rebuild Ingenic cloner package (Slot 1)
         run: |
           set -euo pipefail
           python3 scripts/rebuild_ingenic.py \
             Ender-3_V3_KE_1.1.0.12.ingenic \
             "dist/${{ steps.resolve_release.outputs.ingenic_package }}" \
-            --root2 build_tmp/rootfs.squashfs \
-            --kernel2 build_tmp/xImage
+            --root1 build_tmp/rootfs.squashfs \
+            --kernel1 build_tmp/xImage
 
       - name: Install OTA packager dependencies
         run: |
@@ -134,5 +134,5 @@ jobs:
           else
             gh release create "$RELEASE_TAG" "${files[@]}" \
               --title "$release_title" \
-              --notes "Dual-slot Ingenic cloner and stock CrealityOS USB OTA packages for RosetteOS ${RELEASE_TAG}."
+              --notes "Ingenic cloner (Slot 1) and stock CrealityOS USB OTA packages for RosetteOS ${RELEASE_TAG}."
           fi
