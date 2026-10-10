@@ -3,8 +3,12 @@ name: Build RosetteOS Recovery & OTA Packages
 on:
   workflow_dispatch:
     inputs:
+      tag:
+        description: 'RosetteOS release tag to fetch (leave blank for latest published)'
+        required: false
+        default: ''
       ota_version:
-        description: 'Creality OTA package version'
+        description: 'Package version for Creality stock updater'
         required: false
         default: '1.1.0.34'
 
@@ -21,42 +25,81 @@ jobs:
         with:
           lfs: true
 
-      - name: Resolve latest published RosetteOS release
+      - name: Resolve RosetteOS release
         id: resolve_release
         env:
           GH_TOKEN: ${{ github.token }}
+          REQUESTED_TAG: ${{ github.event.inputs.tag }}
         run: |
           set -euo pipefail
           release_json="$(mktemp)"
           trap 'rm -f "$release_json"' EXIT
+
+          if [ -n "$REQUESTED_TAG" ]; then
+            echo "Fetching specified RosetteOS release tag: $REQUESTED_TAG"
+            api_url="https://api.github.com/repos/RosetteOS/RosetteOS/releases/tags/${REQUESTED_TAG}"
+          else
+            echo "Fetching latest published RosetteOS release..."
+            api_url="https://api.github.com/repos/RosetteOS/RosetteOS/releases?per_page=100"
+          fi
+
           curl --fail --location --retry 3 --retry-delay 2 --show-error \
             --header "Accept: application/vnd.github+json" \
             --header "Authorization: Bearer $GH_TOKEN" \
             --header "X-GitHub-Api-Version: 2022-11-28" \
-            "https://api.github.com/repos/RosetteOS/RosetteOS/releases?per_page=100" \
+            "$api_url" \
             --output "$release_json"
 
-          latest_release_filter='[.[] | select(.draft == false and .published_at != null)] | sort_by(.published_at) | last'
-          release_count="$(jq -er "${latest_release_filter} | if . == null then 0 else 1 end" "$release_json")"
-          if [ "$release_count" -eq 0 ]; then
-            echo "::error::RosetteOS has no published releases. Create a release containing xImage and rootfs.squashfs first."
-            exit 1
-          fi
+          python3 - << 'EOF' "$release_json"
+          import sys, json, os, re
 
-          release_tag="$(jq -er "${latest_release_filter} | .tag_name | select(type == \"string\" and length > 0)" "$release_json")"
-          root2_url="$(jq -er "${latest_release_filter} | [.assets[] | select(.name == \"rootfs.squashfs\") | .browser_download_url] | select(length == 1) | .[0]" "$release_json")"
-          kernel2_url="$(jq -er "${latest_release_filter} | [.assets[] | select(.name == \"xImage\") | .browser_download_url] | select(length == 1) | .[0]" "$release_json")"
-          safe_tag="$(printf '%s' "$release_tag" | sed 's/[^A-Za-z0-9._-]/-/g')"
-          ingenic_package="Ender-3_V3_KE_1.1.0.12-${safe_tag}.ingenic"
+          json_file = sys.argv[1]
+          with open(json_file, "r", encoding="utf-8") as f:
+              data = json.load(f)
 
-          {
-            echo "release_tag=$release_tag"
-            echo "root2_url=$root2_url"
-            echo "kernel2_url=$kernel2_url"
-            echo "ingenic_package=$ingenic_package"
-          } >> "$GITHUB_OUTPUT"
-          echo "Using RosetteOS release: $release_tag"
-          echo "Ingenic package: $ingenic_package"
+          if isinstance(data, list):
+              published = [r for r in data if not r.get("draft") and r.get("published_at")]
+              if not published:
+                  print("::error::RosetteOS has no published releases. Create a release containing xImage and rootfs.squashfs first.", file=sys.stderr)
+                  sys.exit(1)
+              published.sort(key=lambda r: r.get("published_at", ""))
+              release = published[-1]
+          elif isinstance(data, dict):
+              if data.get("message") == "Not Found":
+                  print("::error::Specified RosetteOS release tag not found.", file=sys.stderr)
+                  sys.exit(1)
+              release = data
+          else:
+              print("::error::Unexpected API response format.", file=sys.stderr)
+              sys.exit(1)
+
+          tag_name = release.get("tag_name")
+          if not tag_name:
+              print("::error::Release object missing tag_name.", file=sys.stderr)
+              sys.exit(1)
+
+          assets = {a["name"]: a["browser_download_url"] for a in release.get("assets", []) if "name" in a and "browser_download_url" in a}
+          root2_url = assets.get("rootfs.squashfs")
+          kernel2_url = assets.get("xImage")
+
+          if not root2_url or not kernel2_url:
+              print(f"::error::Release '{tag_name}' does not contain both required assets (rootfs.squashfs and xImage).", file=sys.stderr)
+              sys.exit(1)
+
+          safe_tag = re.sub(r"[^A-Za-z0-9._-]", "-", tag_name)
+          ingenic_package = f"Ender-3_V3_KE_1.1.0.12-{safe_tag}.ingenic"
+
+          github_output = os.environ.get("GITHUB_OUTPUT")
+          if github_output:
+              with open(github_output, "a", encoding="utf-8") as out:
+                  out.write(f"release_tag={tag_name}\n")
+                  out.write(f"root2_url={root2_url}\n")
+                  out.write(f"kernel2_url={kernel2_url}\n")
+                  out.write(f"ingenic_package={ingenic_package}\n")
+
+          print(f"Using RosetteOS release: {tag_name}")
+          print(f"Ingenic package: {ingenic_package}")
+          EOF
 
       - name: Download RosetteOS kernel and rootfs
         env:

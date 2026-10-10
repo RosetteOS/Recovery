@@ -101,15 +101,18 @@ The `scripts/rebuild_ingenic.py` utility injects RosetteOS payloads into Crealit
 
 ## 3. Automated GitHub Actions Workflow
 
-The repository includes [`.github/workflows/rebuild-ingenic.yml`](.github/workflows/rebuild-ingenic.yml) (dispatched manually via **Actions** $\rightarrow$ **Build RosetteOS Recovery & OTA Packages**):
+The repository includes [`.github/workflows/build-recovery-and-ota.yml`](.github/workflows/build-recovery-and-ota.yml) (dispatched manually via **Actions** $\rightarrow$ **Build RosetteOS Recovery & OTA Packages**):
 
-1. Resolves the latest published RosetteOS release from [`RosetteOS/RosetteOS`](https://github.com/RosetteOS/RosetteOS).
-2. Downloads `xImage` and `rootfs.squashfs`.
-3. Rebuilds:
-   - Ingenic Cloner package (Slot 1 replacement): `Ender-3_V3_KE_1.1.0.12-<tag>.ingenic`
-   - Ender-3 V3 KE Stock OTA package: `Ender-3_V3_KE_F005_ota_img_V1.1.0.34.img`
-   - Creality Nebula Pad Stock OTA package: `NEBULA_ota_img_V1.1.0.34.img`
-4. Uploads all three artifacts and publishes them to the GitHub release.
+* **Inputs**:
+  * `tag`: Specify an explicit RosetteOS release tag to fetch (e.g. `nightly`, `v1.0.0`), or leave blank to automatically select the newest published release.
+  * `ota_version`: Specify the package version recognized by Creality's updater (defaults to `1.1.0.34`).
+* **Execution**:
+  1. Resolves and downloads `xImage` and `rootfs.squashfs` from [`RosetteOS/RosetteOS`](https://github.com/RosetteOS/RosetteOS).
+  2. Rebuilds:
+     - Ingenic Cloner package (Slot 1 replacement): `Ender-3_V3_KE_1.1.0.12-<tag>.ingenic`
+     - Ender-3 V3 KE Stock OTA package: `Ender-3_V3_KE_F005_ota_img_V<ota_version>.img`
+     - Creality Nebula Pad Stock OTA package: `NEBULA_ota_img_V<ota_version>.img`
+  3. Uploads all three artifacts and publishes them to the GitHub release.
 
 ---
 
