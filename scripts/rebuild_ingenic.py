@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Replace Ingenic payloads or add NebulaOS Slot 2/B payloads."""
+"""Replace Ingenic payloads or add RosetteOS Slot 2/B payloads."""
 
 from __future__ import annotations
 
