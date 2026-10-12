@@ -5,7 +5,7 @@ This repository provides official recovery and installation packages for **Roset
 It supports two distinct deployment channels:
 
 1. **[Stock CrealityOS USB OTA Update (`.img`)](#1-stock-crealityos-usb-ota-update-img)** *(Recommended)*:
-   Zero-disassembly, single-USB installation directly from the stock touchscreen interface. Installs RosetteOS to Slot 2 while preserving stock CrealityOS in Slot 1.
+   Zero-disassembly, single-USB installation directly from the stock touchscreen interface.
 2. **[Ingenic Cloner USB Flashing Package (`.ingenic`)](#2-ingenic-cloner-usb-flashing-package-ingenic)**:
    Low-level recovery archive for bare-metal flashing and unbricking via Ingenic USB Cloner tool in mask-ROM mode.
 
@@ -52,14 +52,10 @@ Custom artifacts and versions can be passed:
 6. The updater will flash RosetteOS into Slot 2 (`kernel2`, `rootfs2`, `rtos2`), point the boot marker to `ota:kernel2`, and reboot.
 7. On first boot, RosetteOS seeds `/usr/data/rosetteos/` and automatically starts Klipper, Moonraker, and GuppyScreen.
 
-### Dual-Slot Safety & Stock Reversion
+### Destructive Operation Notice & Returning to Stock
 
-* **Non-Destructive**: Stock CrealityOS in Slot 1 (`mmcblk0p5`/`mmcblk0p7`) is never overwritten.
-* **Data Isolation**: Persistent storage in `/usr/data/` is strictly namespaced under `/usr/data/rosetteos/`.
-* **Instant Reversion**: To switch back to stock CrealityOS, toggle the boot marker from SSH:
-  ```bash
-  echo -n "ota:kernel" > /dev/mmcblk0p1 && sync && reboot
-  ```
+* **Destructive Operation**: Installing RosetteOS replaces CrealityOS and overwrites existing Creality user data and configurations. Always back up custom macros, timelapses, or G-code from `/usr/data` before installing.
+* **Returning to Factory Stock**: Because Creality data and environment are overwritten, reverting back to stock CrealityOS requires a bare-metal reflash using stock Creality firmware with the Ingenic USB Cloner tool in Mask-ROM mode.
 
 ---
 
