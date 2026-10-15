@@ -1,6 +1,12 @@
 # RosetteOS Recovery & Firmware Packaging Workspace
 
-This repository provides official recovery and installation packages for **RosetteOS** (Linux 6.6-rt + Klipper/Moonraker/GuppyScreen) on Ingenic X2000 Creality display boards.
+> [!WARNING]
+> **Repository Deprecated & Consolidated**: This repository has been sunset and is archived.
+> All recovery tooling (`pack_creality_ota.py`, `rebuild_ingenic.py`, `build_rosetteos_image.sh`), pre-built assets (`zero.bin`, `zero_nebula.bin`, Ingenic base templates), and release packaging workflows have been consolidated directly into the primary **[RosetteOS/RosetteOS](https://github.com/RosetteOS/RosetteOS)** repository.
+>
+> Official firmware updates (`.img`), Ingenic cloner packages (`.ingenic`), and SWUpdate images (`.swu`) are now published directly from [RosetteOS Releases](https://github.com/RosetteOS/RosetteOS/releases).
+
+This repository historically provided recovery and installation packages for **RosetteOS** (Linux 6.6-rt + Klipper/Moonraker/GuppyScreen) on Ingenic X2000 Creality display boards.
 
 It supports two distinct deployment channels:
 
